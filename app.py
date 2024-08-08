@@ -15,7 +15,6 @@ import uvicorn
 app = FastAPI()
 
 # S3 configuration
-# S3 configuration
 S3_BUCKET = "ci-files-v1"
 S3_ACCESS_KEY = "AKIA23BPTFPQ7AVIKVUQ"
 S3_SECRET_KEY = "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"
@@ -32,6 +31,8 @@ class ImageRequest(BaseModel):
     urls: List[HttpUrl]
 
 class ImageResponse(BaseModel):
+    original_url: str
+    original_filename: str
     image: str
     metadata: dict
 
@@ -68,6 +69,7 @@ def generate_unique_filename() -> str:
 
 def upload_to_s3(file_content: bytes, folder_name: str, file_name: str) -> str:
     s3_key = f"{folder_name}/{file_name}.jpg"
+    
     try:
         s3_client.put_object(Bucket=S3_BUCKET, Key=s3_key, Body=file_content)
         return f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{s3_key}"
@@ -78,36 +80,54 @@ def upload_to_s3(file_content: bytes, folder_name: str, file_name: str) -> str:
 async def process_images(request: ImageRequest):
     results = []
     folder_name = generate_unique_folder_name()
+    
     for url in request.urls:
         try:
             # Download image
             image_content = download_image(url)
+            
+            # Extract original filename from URL
+            original_filename = os.path.basename(url)
+            
             # Create a temporary file
             with tempfile.NamedTemporaryFile(delete=False, suffix='.dcm') as temp_file:
                 temp_file.write(image_content)
                 temp_file_path = temp_file.name
+            
             # Read DICOM file
             dicom_data = pydicom.dcmread(temp_file_path)
+            
             # Extract metadata
             metadata = extract_dicom_metadata(dicom_data)
+            
             # Convert to JPEG
             jpeg_content = convert_dicom_to_jpeg(dicom_data)
+            
             # Generate unique filename
             unique_filename = generate_unique_filename()
+            
             # Upload to S3
             s3_url = upload_to_s3(jpeg_content, folder_name, unique_filename)
+            
             # Append result
-            results.append(ImageResponse(image=s3_url, metadata=metadata))
+            results.append(ImageResponse(
+                original_url=url,
+                original_filename=original_filename,
+                image=s3_url,
+                metadata=metadata
+            ))
+            
             # Clean up temporary file
             os.unlink(temp_file_path)
+        
         except HTTPException as he:
             # Re-raise HTTP exceptions
             raise he
         except Exception as e:
             # Catch all other exceptions
             raise HTTPException(status_code=500, detail=f"Error processing image {url}: {str(e)}")
+    
     return results
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8008))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=8080)
