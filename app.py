@@ -52,9 +52,11 @@ def extract_dicom_metadata(dicom_data: pydicom.dataset.FileDataset) -> dict:
 def convert_dicom_to_jpeg(dicom_data: pydicom.dataset.FileDataset) -> bytes:
     pixel_array = dicom_data.pixel_array
     image = Image.fromarray(pixel_array)
-    # Convert to RGB if necessary
-    if image.mode != 'RGB':
-        image = image.convert('RGB')
+    
+    # Ensure the image is in grayscale mode (L mode in PIL)
+    if image.mode != 'L':
+        image = image.convert('L')
+    
     img_byte_arr = io.BytesIO()
     image.save(img_byte_arr, format='JPEG')
     return img_byte_arr.getvalue()
@@ -100,7 +102,7 @@ async def process_images(request: ImageRequest):
             # Extract metadata
             metadata = extract_dicom_metadata(dicom_data)
             
-            # Convert to JPEG
+            # Convert to JPEG in grayscale mode
             jpeg_content = convert_dicom_to_jpeg(dicom_data)
             
             # Generate unique filename
